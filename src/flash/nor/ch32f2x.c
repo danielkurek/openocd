@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
- *   Copyright (C) 2005 by Dominic Rath                                    *
- *   Dominic.Rath@gmx.de                                                   *
- *                                                                         *
- *   Copyright (C) 2008 by Spencer Oliver                                  *
- *   spen@spen-soft.co.uk                                                  *
- *                                                                         *
- *   Copyright (C) 2011 Øyvind Harboe                                      *
- *   oyvind.harboe@zylin.com                                               *
+ *   Copyright (C) 2023 by mengfanyu                                       *
+ *   SecondHandCoder@gmail.com                                             *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -21,72 +15,72 @@
 #include <target/cortex_m.h>
 
 
-#define FLASH_ERASE_TIMEOUT         		160
-#define FLASH_WRITE_TIMEOUT         		20
-#define FLASH_COMMAND_TIMEOUT				5
+#define FLASH_ERASE_TIMEOUT			160
+#define FLASH_WRITE_TIMEOUT			20
+#define FLASH_COMMAND_TIMEOUT			5
 
-#define CH32F2X_FLASH_SECTOR_KB				4
-#define CH32F2X_FLASH_PAGE_SIZE	    		256
+#define CH32F2X_FLASH_SECTOR_KB			4
+#define CH32F2X_FLASH_PAGE_SIZE			256
 
-#define CH32F2X_FLASH_BANK_BASE     		0x08000000
-#define CH32F2X_OBR_BANK_BASE       		0x1FFFF800
+#define CH32F2X_FLASH_BANK_BASE			0x08000000
+#define CH32F2X_OBR_BANK_BASE			0x1FFFF800
 
-#define CH32F2X_FLASH_INFO					0x1FFFF7E0
-#define CH32F2X_IDCODE_BASE		    		0xE0042000
+#define CH32F2X_FLASH_INFO			0x1FFFF7E0
+#define CH32F2X_IDCODE_BASE			0xE0042000
 
 /* FLASH register addr */
-#define CH32F2X_FLASH_BASE    				0x40022000
+#define CH32F2X_FLASH_BASE			0x40022000
 
-#define CH32F2X_FLASH_ACR_OFFSET     		0x00
-#define CH32F2X_FLASH_KEYR_OFFSET    		0x04
-#define CH32F2X_FLASH_OBKEYR_OFFSET  		0x08
-#define CH32F2X_FLASH_STATR_OFFSET   		0x0C
-#define CH32F2X_FLASH_CTRL_OFFSET    		0x10
-#define CH32F2X_FLASH_ADDR_OFFSET    		0x14
-#define CH32F2X_FLASH_OBR_OFFSET  	 		0x1C
-#define CH32F2X_FLASH_WPR_OFFSET  	 		0x20
-#define CH32F2X_FLASH_MODEKRY_OFFSET 		0x24
+#define CH32F2X_FLASH_ACR_OFFSET		0x00
+#define CH32F2X_FLASH_KEYR_OFFSET		0x04
+#define CH32F2X_FLASH_OBKEYR_OFFSET 		0x08
+#define CH32F2X_FLASH_STATR_OFFSET		0x0C
+#define CH32F2X_FLASH_CTRL_OFFSET		0x10
+#define CH32F2X_FLASH_ADDR_OFFSET		0x14
+#define CH32F2X_FLASH_OBR_OFFSET		0x1C
+#define CH32F2X_FLASH_WPR_OFFSET		0x20
+#define CH32F2X_FLASH_MODEKRY_OFFSET		0x24
 
 /* FLASH_STATR register bits */
-#define CH32F2X_FLASH_STATR_BSY      		0x00000001
-#define CH32F2X_FLASH_STATR_WRBSY    		0x00000002
-#define CH32F2X_FLASH_STATR_WRPRTERR 		0x00000010
-#define CH32F2X_FLASH_STATR_EOP 	 		0x00000020
-#define CH32F2X_FLASH_STATR_EHMODS   		0x00000080
+#define CH32F2X_FLASH_STATR_BSY			0x00000001
+#define CH32F2X_FLASH_STATR_WRBSY		0x00000002
+#define CH32F2X_FLASH_STATR_WRPRTERR		0x00000010
+#define CH32F2X_FLASH_STATR_EOP			0x00000020
+#define CH32F2X_FLASH_STATR_EHMODS		0x00000080
 
 /* FLASH_CTRL register bits */
-#define CH32F2X_FLASH_CTRL_PG      	 		0x00000001
-#define CH32F2X_FLASH_CTRL_PER     	 		0x00000002
-#define CH32F2X_FLASH_CTRL_MER     	 		0x00000004
-#define CH32F2X_FLASH_CTRL_OBPG    	 		0x00000010
-#define CH32F2X_FLASH_CTRL_OBER    	 		0x00000020
-#define CH32F2X_FLASH_CTRL_STRT    	 		0x00000040
-#define CH32F2X_FLASH_CTRL_LOCK    	 		0x00000080
-#define CH32F2X_FLASH_CTRL_OBWRE   	 		0x00000200
-#define CH32F2X_FLASH_CTRL_ERRIR   	 		0x00000400
-#define CH32F2X_FLASH_CTRL_EOPIE   	 		0x00001000
-#define CH32F2X_FLASH_CTRL_FLOCK   	 		0x00008000
-#define CH32F2X_FLASH_CTRL_FTPG   	 		0x00010000
-#define CH32F2X_FLASH_CTRL_FTER   	 		0x00020000
-#define CH32F2X_FLASH_CTRL_BER32   	 		0x00040000
-#define CH32F2X_FLASH_CTRL_BER64   	 		0x00080000
-#define CH32F2X_FLASH_CTRL_PGSTRT    		0x00200000
-#define CH32F2X_FLASH_CTRL_PSENACT   		0x00400000
-#define CH32F2X_FLASH_CTRL_EHMOD   	 		0x01000000
-#define CH32F2X_FLASH_CTRL_SCKMOD    		0x02000000
+#define CH32F2X_FLASH_CTRL_PG			0x00000001
+#define CH32F2X_FLASH_CTRL_PER			0x00000002
+#define CH32F2X_FLASH_CTRL_MER			0x00000004
+#define CH32F2X_FLASH_CTRL_OBPG			0x00000010
+#define CH32F2X_FLASH_CTRL_OBER			0x00000020
+#define CH32F2X_FLASH_CTRL_STRT			0x00000040
+#define CH32F2X_FLASH_CTRL_LOCK			0x00000080
+#define CH32F2X_FLASH_CTRL_OBWRE		0x00000200
+#define CH32F2X_FLASH_CTRL_ERRIR		0x00000400
+#define CH32F2X_FLASH_CTRL_EOPIE		0x00001000
+#define CH32F2X_FLASH_CTRL_FLOCK		0x00008000
+#define CH32F2X_FLASH_CTRL_FTPG			0x00010000
+#define CH32F2X_FLASH_CTRL_FTER			0x00020000
+#define CH32F2X_FLASH_CTRL_BER32		0x00040000
+#define CH32F2X_FLASH_CTRL_BER64		0x00080000
+#define CH32F2X_FLASH_CTRL_PGSTRT		0x00200000
+#define CH32F2X_FLASH_CTRL_PSENACT		0x00400000
+#define CH32F2X_FLASH_CTRL_EHMOD		0x01000000
+#define CH32F2X_FLASH_CTRL_SCKMOD		0x02000000
 
 /* FLASH_OBR register bits */
-#define CH32F2X_FLASH_OBR_OBERR      		0x00000001
-#define CH32F2X_FLASH_OBR_RDRRT      		0x00000002
-#define CH32F2X_FLASH_OBR_IWDGSW 	 		0x00000004
-#define CH32F2X_FLASH_OBR_STOPRST 	 		0x00000008
-#define CH32F2X_FLASH_OBR_STANDYRST  		0x00000010
+#define CH32F2X_FLASH_OBR_OBERR			0x00000001
+#define CH32F2X_FLASH_OBR_RDRRT			0x00000002
+#define CH32F2X_FLASH_OBR_IWDGSW		0x00000004
+#define CH32F2X_FLASH_OBR_STOPRST		0x00000008
+#define CH32F2X_FLASH_OBR_STANDYRST		0x00000010
 #define CH32F2X_FLASH_OBR_RAM_CODE_MODE		0x00000300
 
 /* register unlock keys */
-#define CH32F2X_OBR_KEY      				0xA5
-#define CH32F2X_KEY1           				0x45670123
-#define CH32F2X_KEY2           				0xCDEF89AB
+#define CH32F2X_OBR_KEY				0xA5
+#define CH32F2X_KEY1				0x45670123
+#define CH32F2X_KEY2				0xCDEF89AB
 
 
 struct ch32f2x_options {
@@ -517,28 +511,19 @@ static int ch32f2x_mass_erase(struct flash_bank *bank)
 }
 
 static int ch32f2x_page_erase(struct flash_bank *bank, unsigned int *start_page,
-						unsigned int end_page, uint32_t size)
+				unsigned int end_page, uint32_t size)
 {
 	struct target *target = bank->target;
 	uint32_t ctrl;
-	uint8_t need_erase;
 	int retval = ERROR_OK;
 
-	if (*start_page >= end_page)
-		return ERROR_OK;
-
-	if (target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
-		return ERROR_TARGET_NOT_HALTED;
-	}
-
+	/* run fast erase except 4k erase */
 	if (size != 4 * 1024) {
-		/* unlock fast flash registers */
 		retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), &ctrl);
 		if (retval != ERROR_OK)
 			return retval;
 
-		if ((ctrl & CH32F2X_FLASH_CTRL_FLOCK) == CH32F2X_FLASH_CTRL_FLOCK) {
+		if (ctrl & CH32F2X_FLASH_CTRL_FLOCK) {
 			retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_MODEKRY_OFFSET), CH32F2X_KEY1);
 			if (retval != ERROR_OK)
 				return retval;
@@ -553,43 +538,47 @@ static int ch32f2x_page_erase(struct flash_bank *bank, unsigned int *start_page,
 		}
 	}	
 
-	need_erase = 0;
-	while (end_page - *start_page >= size / CH32F2X_FLASH_PAGE_SIZE) {
-		if (need_erase == 0) {
-			need_erase = 1;
-			retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), &ctrl);
-			if (retval != ERROR_OK)
-				return retval;
+	/* set erase size */
+	retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), &ctrl);
+	if (retval != ERROR_OK)
+		return retval;
 
-			if (size == 64 * 1024) {
-				retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl | CH32F2X_FLASH_CTRL_BER64);
-				if (retval != ERROR_OK)
-					return retval;
-			}
-			else if (size == 32 * 1024) {
-				retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl | CH32F2X_FLASH_CTRL_BER32);
-				if (retval != ERROR_OK)
-					return retval;
-			}
-			else if (size == 4 * 1024) {
-				retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl | CH32F2X_FLASH_CTRL_PER);
-				if (retval != ERROR_OK)
-					return retval;
-			}
-			else if (size == CH32F2X_FLASH_PAGE_SIZE) {
-				retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl | CH32F2X_FLASH_CTRL_FTER);
-				if (retval != ERROR_OK)
-					return retval;
-			}		
-		}
+	if (size == 64 * 1024) {
+		ctrl |= CH32F2X_FLASH_CTRL_BER64;
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl);
+		if (retval != ERROR_OK)
+			return retval;
+	}
+	else if (size == 32 * 1024) {
+		ctrl |= CH32F2X_FLASH_CTRL_BER32;
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl);
+		if (retval != ERROR_OK)
+			return retval;
+	}
+	else if (size == 4 * 1024) {
+		ctrl |= CH32F2X_FLASH_CTRL_PER;
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl);
+		if (retval != ERROR_OK)
+			return retval;
+	}
+	else if (size == CH32F2X_FLASH_PAGE_SIZE) {
+		ctrl |= CH32F2X_FLASH_CTRL_FTER;
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl);
+		if (retval != ERROR_OK)
+			return retval;
+	}
 
+	/* set erase address and start erase loop until remain sector less than current erase size */
+	unsigned int count = end_page - *start_page + 1; 
+	while (count >= size / CH32F2X_FLASH_PAGE_SIZE) {
 		/* set address */
 		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_ADDR_OFFSET), bank->base + bank->sectors[*start_page].offset);
 		if (retval != ERROR_OK)
 			return retval;
 
 		/* set strt */
-		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl | CH32F2X_FLASH_CTRL_BER64 | CH32F2X_FLASH_CTRL_STRT);
+		ctrl |= CH32F2X_FLASH_CTRL_STRT;
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl);
 		if (retval != ERROR_OK)
 			return retval;
 
@@ -598,41 +587,40 @@ static int ch32f2x_page_erase(struct flash_bank *bank, unsigned int *start_page,
 		if (retval != ERROR_OK)
 			return retval;
 
+		count -= size / CH32F2X_FLASH_PAGE_SIZE;
 		*start_page += size / CH32F2X_FLASH_PAGE_SIZE;
 	}
 
-	if (need_erase == 1) {
-		retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), &ctrl);
+	/* clr erase size register */
+	retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), &ctrl);
+	if (retval != ERROR_OK)
+		return retval;
+
+	if (size == 64 * 1024) {
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_BER64);
 		if (retval != ERROR_OK)
 			return retval;
-
-		if (size == 64 * 1024) {
-			retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_BER64);
-			if (retval != ERROR_OK)
-				return retval;
-		}
-		else if (size == 32 * 1024) {
-			retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_BER32);
-			if (retval != ERROR_OK)
-				return retval;
-		}
-		else if (size == 4 * 1024) {
-			retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_PER);
-			if (retval != ERROR_OK)
-				return retval;
-		}
-		else if (size == CH32F2X_FLASH_PAGE_SIZE) {
-			retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_FTER);
-			if (retval != ERROR_OK)
-				return retval;
-		}
+	}
+	else if (size == 32 * 1024) {
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_BER32);
+		if (retval != ERROR_OK)
+			return retval;
+	}
+	else if (size == 4 * 1024) {
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_PER);
+		if (retval != ERROR_OK)
+			return retval;
+	}
+	else if (size == CH32F2X_FLASH_PAGE_SIZE) {
+		retval = target_write_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), ctrl & ~CH32F2X_FLASH_CTRL_FTER);
+		if (retval != ERROR_OK)
+			return retval;
 	}
 
 	return ERROR_OK;
 }
 
-static int ch32f2x_erase(struct flash_bank *bank, unsigned int first,
-		unsigned int last)
+static int ch32f2x_erase(struct flash_bank *bank, unsigned int first, unsigned int last)
 {
 	int retval = ERROR_OK;
 
@@ -651,28 +639,34 @@ static int ch32f2x_erase(struct flash_bank *bank, unsigned int first,
 	if (retval != ERROR_OK)
 		return retval;
 
+	if (first > last)
+		return ERROR_TARGET_INVALID;
+
 	if ((first == 0) && (last == (bank->num_sectors - 1)))
 		return ch32f2x_mass_erase(bank);
 	
-	if (last - first >= 64 * 1024 / CH32F2X_FLASH_PAGE_SIZE) {
+	LOG_INFO("first = 0x%08" PRIx32 "", first);
+	LOG_INFO("last = 0x%08" PRIx32 "", last);
+
+	if (last - first + 1 >= 64 * 1024 / CH32F2X_FLASH_PAGE_SIZE) {
 		retval = ch32f2x_page_erase(bank, &first, last, 64 * 1024);
 		if (retval != ERROR_OK)
 			return retval;
 	}
 
-	if (last - first >= 32 * 1024 / CH32F2X_FLASH_PAGE_SIZE) {
+	if (last - first + 1 >= 32 * 1024 / CH32F2X_FLASH_PAGE_SIZE) {
 		retval = ch32f2x_page_erase(bank, &first, last, 32 * 1024);
 		if (retval != ERROR_OK)
 			return retval;
 	}
 
-	if (last - first >= 4 * 1024 / CH32F2X_FLASH_PAGE_SIZE) {
+	if (last - first + 1 >= 4 * 1024 / CH32F2X_FLASH_PAGE_SIZE) {
 		retval = ch32f2x_page_erase(bank, &first, last, 4 * 1024);
 		if (retval != ERROR_OK)
 			return retval;
 	}
 
-	if (last - first >= CH32F2X_FLASH_PAGE_SIZE) {
+	if (last - first + 1 >= 1) {
 		retval = ch32f2x_page_erase(bank, &first, last, CH32F2X_FLASH_PAGE_SIZE);
 		if (retval != ERROR_OK)
 			return retval;
@@ -681,8 +675,7 @@ static int ch32f2x_erase(struct flash_bank *bank, unsigned int first,
 	return ERROR_OK;
 }
 
-static int ch32f2x_protect(struct flash_bank *bank, int set, unsigned int first,
-		unsigned int last)
+static int ch32f2x_protect(struct flash_bank *bank, int set, unsigned int first, unsigned int last)
 {
 	struct target *target = bank->target;
 	struct ch32f2x_flash_bank *ch32f2x_info = bank->driver_priv;
@@ -710,12 +703,14 @@ static int ch32f2x_protect(struct flash_bank *bank, int set, unsigned int first,
 }
 
 static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buffer,
-		uint32_t address, uint32_t hwords_count)
+					uint32_t address, uint32_t hwords_count)
 {
+	struct ch32f2x_flash_bank *ch32f2x_info = bank->driver_priv;
 	struct target *target = bank->target;
 	uint32_t buffer_size;
 	struct working_area *write_algorithm;
 	struct working_area *source;
+	struct working_area *write_algorithm_stack;
 	struct armv7m_algorithm armv7m_info;
 	int retval = ERROR_OK;
 
@@ -738,7 +733,7 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 	}
 
 	/* memory buffer */
-	buffer_size = target_get_working_area_avail(target);
+	buffer_size = target_get_working_area_avail(target) - 64;
 	buffer_size = MIN(hwords_count * 2 + 8, MAX(buffer_size, 256));
 	/* Normally we allocate all available working area.
 	 * MIN shrinks buffer_size if the size of the written block is smaller.
@@ -758,23 +753,39 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	}
 
-	struct reg_param reg_params[4];
+	/* Stack area */
+	retval = target_alloc_working_area(target, 64, &write_algorithm_stack);
+	if (retval != ERROR_OK) {
+		target_free_working_area(target, write_algorithm_stack);
+		LOG_DEBUG("no working area for target algorithm stack");
+		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+	}
 
-	init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT);	/* count (halfword-16bit) */
-	init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);	/* buffer start */
-	init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT);	/* buffer end */
-	init_reg_param(&reg_params[3], "r3", 32, PARAM_IN_OUT);	/* target address */
+	struct reg_param reg_params[5];
 
-	buf_set_u32(reg_params[0].value, 0, 32, hwords_count);
+	init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT);				/* Flash register base address */
+	init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);				/* buffer start */
+	init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT);				/* buffer end */
+	init_reg_param(&reg_params[3], "r3", 32, PARAM_OUT);				/* target address */
+	init_reg_param(&reg_params[4], "sp", 32, PARAM_OUT);				/* count (halfword-16bit) */
+
+	struct mem_param mem_params[1];
+
+	init_mem_param(&mem_params[0], write_algorithm_stack->address + 64, 32, PARAM_OUT);	/* sp address */
+
+	buf_set_u32(reg_params[0].value, 0, 32, ch32f2x_info->register_base);
 	buf_set_u32(reg_params[1].value, 0, 32, source->address);
 	buf_set_u32(reg_params[2].value, 0, 32, source->address + source->size);
 	buf_set_u32(reg_params[3].value, 0, 32, address);
+	buf_set_u32(reg_params[4].value, 0, 32, write_algorithm_stack->address + 64);
+
+	buf_set_u32(mem_params[0].value, 0, 32, hwords_count);
 
 	armv7m_info.common_magic = ARMV7M_COMMON_MAGIC;
 	armv7m_info.core_mode = ARM_MODE_THREAD;
 
 	retval = target_run_flash_async_algorithm(target, buffer, hwords_count, 2,
-			0, NULL,
+			ARRAY_SIZE(mem_params), mem_params,
 			ARRAY_SIZE(reg_params), reg_params,
 			source->address, source->size,
 			write_algorithm->address, 0,
@@ -798,8 +809,12 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 	for (unsigned int i = 0; i < ARRAY_SIZE(reg_params); i++)
 		destroy_reg_param(&reg_params[i]);
 
+	for (unsigned int i = 0; i < ARRAY_SIZE(mem_params); i++)
+		destroy_mem_param(&mem_params[i]);
+
 	target_free_working_area(target, source);
 	target_free_working_area(target, write_algorithm);
+	target_free_working_area(target, write_algorithm_stack);
 
 	return retval;
 }
@@ -809,7 +824,7 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
  *  Flash controller must be unlocked before this call.
  */
 static int ch32f2x_write_block(struct flash_bank *bank,
-		const uint8_t *buffer, uint32_t address, uint32_t hwords_count)
+				const uint8_t *buffer, uint32_t address, uint32_t hwords_count)
 {
 	struct target *target = bank->target;
 	uint32_t ctrl;
@@ -879,7 +894,7 @@ static int ch32f2x_write_block(struct flash_bank *bank,
 }
 
 static int ch32f2x_write(struct flash_bank *bank, const uint8_t *buffer,
-		uint32_t offset, uint32_t count)
+				uint32_t offset, uint32_t count)
 {
 	int retval = ERROR_OK;
 
@@ -924,13 +939,13 @@ static int ch32f2x_get_property_addr(struct target *target, struct ch32f2x_prope
 	}
 
 	switch (cortex_m_get_partno_safe(target)) {
-	case CORTEX_M3_PARTNO:
-		addr->device_id = CH32F2X_IDCODE_BASE;
-		addr->flash_size = CH32F2X_FLASH_INFO;
-		return ERROR_OK;
-	default:
-		LOG_ERROR("Cannot identify target as a ch32f2x");
-		return ERROR_FAIL;
+		case CORTEX_M3_PARTNO:
+			addr->device_id = CH32F2X_IDCODE_BASE;
+			addr->flash_size = CH32F2X_FLASH_INFO;
+			return ERROR_OK;
+		default:
+			LOG_ERROR("Cannot identify target as a ch32f2x");
+			return ERROR_FAIL;
 	}
 }
 
@@ -976,19 +991,19 @@ static int get_ch32f2x_info(struct flash_bank *bank, struct command_invocation *
 	const char *rev_str = NULL;
 
 	switch (device_id) {
-	case 0x418:
-		device_str = "CH32F2x (Medium Density)";
-		switch (rev_id) {
-		case 0x2050:
-			rev_str = "5";
+		case 0x418:
+			device_str = "CH32F2x (Medium Density)";
+			switch (rev_id) {
+				case 0x2050:
+					rev_str = "5";
+					break;
+				default:
+					break;	
+			}
 			break;
 		default:
-			break;	
-		}
-		break;
-	default:
-		command_print_sameline(cmd, "Cannot identify target as a CH32Fx\n");
-		return ERROR_FAIL;
+			command_print_sameline(cmd, "Cannot identify target as a CH32Fx\n");
+			return ERROR_FAIL;
 	}
 
 	if (rev_str)
@@ -1026,20 +1041,20 @@ static int ch32f2x_probe(struct flash_bank *bank)
 
 	/* set page size, protection granularity and max flash size depending on family */
 	switch (device_id) {
-	case 0x418: 
-		page_size = CH32F2X_FLASH_PAGE_SIZE;
-		ch32f2x_info->ppage_size = CH32F2X_FLASH_SECTOR_KB * 1024 / CH32F2X_FLASH_PAGE_SIZE;
-		switch (rev_id) {
-		case 0x2050: 
-			max_flash_size_in_kb = 128;
+		case 0x418: 
+			page_size = CH32F2X_FLASH_PAGE_SIZE;
+			ch32f2x_info->ppage_size = CH32F2X_FLASH_SECTOR_KB * 1024 / CH32F2X_FLASH_PAGE_SIZE;
+			switch (rev_id) {
+				case 0x2050: 
+					max_flash_size_in_kb = 128;
+					break;
+				default:
+					break;
+			}	
 			break;
 		default:
-			break;
-		}	
-		break;
-	default:
-		LOG_WARNING("Cannot identify target as a CH32 family.");
-		return ERROR_FAIL;
+			LOG_WARNING("Cannot identify target as a CH32 family.");
+			return ERROR_FAIL;
 	}		
 	
 	/* get flash size from target. */
@@ -1267,7 +1282,7 @@ COMMAND_HANDLER(ch32f2x_handle_options_read_command)
 	command_print(CMD, "standby mode: %sreset generated upon entry",
 				(option_bytes & (1 << 4)) ? "no " : "");
 
-	command_print(CMD, "user data = 0x%02" PRIx16 "", ((user_data & 0xFF) | (((user_data >> 16) & 0xFF) << 8)));
+	command_print(CMD, "user data = 0x%04" PRIx16 "", ((user_data & 0xFF) | (((user_data >> 16) & 0xFF) << 8)));
 
 	return ERROR_OK;
 }

@@ -15,17 +15,15 @@ all: ch32f2x.inc
 
 .PHONY: clean
 
-%.elf: %.c
-	$(CC) $(CFLAGS) $< -o $@
+%.o: %.c
+	$(CC) $(CFLAGS) -Wall -Wextra -Wa,-adhln=$*.lst $< -o $@
 	
-%.lst: %.elf
-	$(OBJDUMP) -S $< > $@
-
-%.bin: %.elf
+%.bin: %.o
 	$(OBJCOPY) -Obinary $< $@
 
 %.inc: %.bin
 	$(BIN2C) < $< > $@
 
 clean:
-	-rm -f *.elf *.lst *.bin *.inc
+	-rm -f *.o *.lst *.bin *.inc
+	
