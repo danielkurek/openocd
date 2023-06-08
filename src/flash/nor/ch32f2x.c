@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
- *   Copyright (C) 2023 by mengfanyu                                       *
+ *   Copyright (C) 2023 by MengFanYu                                       *
  *   SecondHandCoder@gmail.com                                             *
  ***************************************************************************/
 
@@ -21,6 +21,7 @@
 
 #define CH32F2X_FLASH_SECTOR_KB			4
 #define CH32F2X_FLASH_PAGE_SIZE			256
+#define CH32F2X_WRITE_ALGORITHM_STACK		32
 
 #define CH32F2X_FLASH_BANK_BASE			0x08000000
 #define CH32F2X_OBR_BANK_BASE			0x1FFFF800
@@ -211,11 +212,11 @@ static int ch32f2x_unlock_options_reg(struct flash_bank *bank)
 		return retval;
 
 	if (((ctrl & CH32F2X_FLASH_CTRL_LOCK) == 0)
-		&&((ctrl & CH32F2X_FLASH_CTRL_OBWRE) == CH32F2X_FLASH_CTRL_OBWRE))
+		&&(ctrl & CH32F2X_FLASH_CTRL_OBWRE))
 		return ERROR_OK;
 
 	/* unlock flash registers */
-	if ((ctrl & CH32F2X_FLASH_CTRL_LOCK) == CH32F2X_FLASH_CTRL_LOCK) {
+	if (ctrl & CH32F2X_FLASH_CTRL_LOCK) {
 		retval = ch32f2x_unlock_reg(bank);
 		if (retval != ERROR_OK)
 			return retval;
@@ -234,7 +235,7 @@ static int ch32f2x_unlock_options_reg(struct flash_bank *bank)
 		int timeout = FLASH_COMMAND_TIMEOUT;
 		for(;;) {
 			retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_CTRL_OFFSET), &ctrl);
-			if ((ctrl & CH32F2X_FLASH_CTRL_OBWRE) == CH32F2X_FLASH_CTRL_OBWRE)
+			if (ctrl & CH32F2X_FLASH_CTRL_OBWRE)
 				return ERROR_OK;
 			if (timeout-- <= 0) {
 				LOG_ERROR("timed out waiting for flash options unlock, maybe flash options is locked-up, please reset");
@@ -263,7 +264,7 @@ static int ch32f2x_read_options(struct flash_bank *bank)
 	ch32f2x_info->option_bytes.user = (option_bytes >> 2) & 0xFF;
 
 	/* read user data option bytes */
-	retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_OBR_BANK_BASE + 4), &option_bytes);
+	retval = target_read_u32(target, CH32F2X_OBR_BANK_BASE + 4, &option_bytes);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -373,7 +374,7 @@ static int ch32f2x_write_options(struct flash_bank *bank)
 
 	/* set read protect */
 	options_buff = ch32f2x_info->option_bytes.rdp; 
-	retval = target_write_u16(target, ch32f2x_get_flash_reg(bank, CH32F2X_OBR_BANK_BASE), options_buff);
+	retval = target_write_u16(target, CH32F2X_OBR_BANK_BASE, options_buff);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -383,7 +384,7 @@ static int ch32f2x_write_options(struct flash_bank *bank)
 
 	/* set user data */
 	options_buff = ch32f2x_info->option_bytes.user;
-	retval = target_write_u16(target, ch32f2x_get_flash_reg(bank, CH32F2X_OBR_BANK_BASE + 2), options_buff);
+	retval = target_write_u16(target, CH32F2X_OBR_BANK_BASE + 2, options_buff);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -393,7 +394,7 @@ static int ch32f2x_write_options(struct flash_bank *bank)
 
 	/* set user private data */
 	options_buff = ch32f2x_info->option_bytes.data & 0xFF;
-	retval = target_write_u16(target, ch32f2x_get_flash_reg(bank, CH32F2X_OBR_BANK_BASE + 4), options_buff);
+	retval = target_write_u16(target, CH32F2X_OBR_BANK_BASE + 4, options_buff);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -402,7 +403,7 @@ static int ch32f2x_write_options(struct flash_bank *bank)
 		return retval;
 
 	options_buff = (ch32f2x_info->option_bytes.data >> 8) & 0xFF;
-	retval = target_write_u16(target, ch32f2x_get_flash_reg(bank, CH32F2X_OBR_BANK_BASE + 6), options_buff);
+	retval = target_write_u16(target, CH32F2X_OBR_BANK_BASE + 6, options_buff);
 	if (retval != ERROR_OK)
 		return retval;
 
@@ -413,7 +414,7 @@ static int ch32f2x_write_options(struct flash_bank *bank)
 	/* set write protect */
 	for (uint8_t i = 0; i < 4; i++) {
 		options_buff = (ch32f2x_info->option_bytes.protection >> (i * 8)) & 0xFF;
-		retval = target_write_u16(target, ch32f2x_get_flash_reg(bank, CH32F2X_OBR_BANK_BASE + 8 + i * 2), options_buff);
+		retval = target_write_u16(target, CH32F2X_OBR_BANK_BASE + 8 + i * 2, options_buff);
 		if (retval != ERROR_OK)
 			return retval;
 
@@ -441,17 +442,25 @@ static int ch32f2x_write_options(struct flash_bank *bank)
 static int ch32f2x_protect_check(struct flash_bank *bank)
 {
 	struct target *target = bank->target;
-	uint32_t protection;
+	uint32_t write_protection, read_protection;
 	int retval = ERROR_OK;
 
 	/* medium density - each bit refers to a 8 sector protection block
 	 * bit 31 refers to all remaining sectors in a bank */
-	retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_WPR_OFFSET), &protection);
+	retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_WPR_OFFSET), &write_protection);
+	if (retval != ERROR_OK)
+		return retval;
+
+	retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_FLASH_OBR_OFFSET), &read_protection);
 	if (retval != ERROR_OK)
 		return retval;
 
 	for (unsigned int i = 0; i < bank->num_prot_blocks; i++)
-		bank->prot_blocks[i].is_protected = (protection & (1 << i)) ? 0 : 1;
+		bank->prot_blocks[i].is_protected = (write_protection & (1 << i)) ? 0 : 1;
+
+	/* if read protection set first block(0 - 15 sector 4k) is write protected automatic */
+	if (read_protection & CH32F2X_FLASH_OBR_RDRRT)
+		bank->prot_blocks[0].is_protected = 1;
 
 	return ERROR_OK;
 }
@@ -644,9 +653,6 @@ static int ch32f2x_erase(struct flash_bank *bank, unsigned int first, unsigned i
 
 	if ((first == 0) && (last == (bank->num_sectors - 1)))
 		return ch32f2x_mass_erase(bank);
-	
-	LOG_INFO("first = 0x%08" PRIx32 "", first);
-	LOG_INFO("last = 0x%08" PRIx32 "", last);
 
 	if (last - first + 1 >= 64 * 1024 / CH32F2X_FLASH_PAGE_SIZE) {
 		retval = ch32f2x_page_erase(bank, &first, last, 64 * 1024);
@@ -719,8 +725,9 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 	};
 
 	/* flash write code */
-	if (target_alloc_working_area(target, sizeof(ch32f2x_flash_write_code),
-			&write_algorithm) != ERROR_OK) {
+	retval = target_alloc_working_area(target, sizeof(ch32f2x_flash_write_code), &write_algorithm);
+	if (retval != ERROR_OK) {
+		target_free_working_area(target, write_algorithm);
 		LOG_WARNING("no working area available, can't do block memory writes");
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	}
@@ -733,9 +740,17 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 	}
 
 	/* memory buffer */
-	buffer_size = target_get_working_area_avail(target) - 64;
+	buffer_size = target_get_working_area_avail(target);
+	if (buffer_size > CH32F2X_WRITE_ALGORITHM_STACK) {
+		buffer_size -= CH32F2X_WRITE_ALGORITHM_STACK;
+	}	
+	else {
+		LOG_WARNING("no working area available for stack area, can't do block memory writes");
+		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;	
+	}
+
 	buffer_size = MIN(hwords_count * 2 + 8, MAX(buffer_size, 256));
-	/* Normally we allocate all available working area.
+	/* Normally we allocate all available working area except stack area.
 	 * MIN shrinks buffer_size if the size of the written block is smaller.
 	 * MAX prevents using async algo if the available working area is smaller
 	 * than 256, the following allocation fails with
@@ -746,6 +761,7 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 	/* Allocated size is always 32-bit word aligned */
 	if (retval != ERROR_OK) {
 		target_free_working_area(target, write_algorithm);
+		target_free_working_area(target, source);
 		LOG_WARNING("no large enough working area available, can't do block memory writes");
 		/* target_alloc_working_area() may return ERROR_FAIL if area backup fails:
 		 * convert any error to ERROR_TARGET_RESOURCE_NOT_AVAILABLE
@@ -753,9 +769,11 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	}
 
-	/* Stack area */
-	retval = target_alloc_working_area(target, 64, &write_algorithm_stack);
+	/* stack area */
+	retval = target_alloc_working_area(target, CH32F2X_WRITE_ALGORITHM_STACK, &write_algorithm_stack);
 	if (retval != ERROR_OK) {
+		target_free_working_area(target, write_algorithm);
+		target_free_working_area(target, source);
 		target_free_working_area(target, write_algorithm_stack);
 		LOG_DEBUG("no working area for target algorithm stack");
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
@@ -763,21 +781,22 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 
 	struct reg_param reg_params[5];
 
-	init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT);				/* Flash register base address */
-	init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);				/* buffer start */
-	init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT);				/* buffer end */
-	init_reg_param(&reg_params[3], "r3", 32, PARAM_OUT);				/* target address */
-	init_reg_param(&reg_params[4], "sp", 32, PARAM_OUT);				/* count (halfword-16bit) */
+	init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT);	/* Flash register base address and return value */
+	init_reg_param(&reg_params[1], "r1", 32, PARAM_OUT);	/* buffer start */
+	init_reg_param(&reg_params[2], "r2", 32, PARAM_OUT);	/* buffer end */
+	init_reg_param(&reg_params[3], "r3", 32, PARAM_OUT);	/* target address */
+	init_reg_param(&reg_params[4], "sp", 32, PARAM_OUT);	/* count (halfword-16bit) */
 
 	struct mem_param mem_params[1];
 
-	init_mem_param(&mem_params[0], write_algorithm_stack->address + 64, 32, PARAM_OUT);	/* sp address */
+	/* set sp address to stack area top in order to transfer r4(count) value to target algorithm function fifth participant */
+	init_mem_param(&mem_params[0], write_algorithm_stack->address + CH32F2X_WRITE_ALGORITHM_STACK, 32, PARAM_OUT);	
 
 	buf_set_u32(reg_params[0].value, 0, 32, ch32f2x_info->register_base);
 	buf_set_u32(reg_params[1].value, 0, 32, source->address);
 	buf_set_u32(reg_params[2].value, 0, 32, source->address + source->size);
 	buf_set_u32(reg_params[3].value, 0, 32, address);
-	buf_set_u32(reg_params[4].value, 0, 32, write_algorithm_stack->address + 64);
+	buf_set_u32(reg_params[4].value, 0, 32, write_algorithm_stack->address + CH32F2X_WRITE_ALGORITHM_STACK);
 
 	buf_set_u32(mem_params[0].value, 0, 32, hwords_count);
 
@@ -863,7 +882,7 @@ static int ch32f2x_write_block(struct flash_bank *bank,
 		if (retval != ERROR_OK)
 			return retval;
 
-		while (hwords_count > 0) {
+		while (hwords_count) {
 			retval = target_write_memory(target, address, 2, 1, buffer);
 			if (retval != ERROR_OK)
 				return retval;
@@ -1026,7 +1045,7 @@ static int ch32f2x_probe(struct flash_bank *bank)
 	ch32f2x_info->probed = false;
 	ch32f2x_info->register_base = CH32F2X_FLASH_BASE;
 
-	/* default factory read protection level 0 */
+	/* default factory not read protection */
 	ch32f2x_info->default_rdp = CH32F2X_OBR_KEY;
 
 	/* read ch32f2x device id register */
@@ -1252,7 +1271,7 @@ COMMAND_HANDLER(ch32f2x_handle_options_read_command)
 		return retval;
 
 	/* read user data option bytes */
-	retval = target_read_u32(target, ch32f2x_get_flash_reg(bank, CH32F2X_OBR_BANK_BASE + 4), &user_data);
+	retval = target_read_u32(target, CH32F2X_OBR_BANK_BASE + 4, &user_data);
 	if (retval != ERROR_OK)
 		return retval;
 

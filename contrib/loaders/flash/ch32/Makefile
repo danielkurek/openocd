@@ -9,14 +9,14 @@ OBJCOPY=$(CROSS_COMPILE)objcopy
 OBJDUMP=$(CROSS_COMPILE)objdump
 
 
-CFLAGS = -c -mthumb -mcpu=cortex-m3 -nostdlib -nostartfiles -Os -g -fPIC
+CFLAGS = -c -mthumb -mcpu=cortex-m3 -nostdlib -nostartfiles -Os -g -fPIC -Wall -Wextra
 
 all: ch32f2x.inc
 
 .PHONY: clean
 
 %.o: %.c
-	$(CC) $(CFLAGS) -Wall -Wextra -Wa,-adhln=$*.lst $< -o $@
+	$(CC) $(CFLAGS) -Wa,-adhln=$*.lst $< -o $@
 	
 %.bin: %.o
 	$(OBJCOPY) -Obinary $< $@
