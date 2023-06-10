@@ -739,7 +739,7 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 		return retval;
 	}
 
-	/* memory buffer */
+	/* memory buffer reserve stack area at the end of ram */
 	buffer_size = target_get_working_area_avail(target);
 	if (buffer_size > CH32F2X_WRITE_ALGORITHM_STACK) {
 		buffer_size -= CH32F2X_WRITE_ALGORITHM_STACK;
@@ -779,6 +779,20 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	}
 
+	/* Transfer target algorithm function parameters.
+	 * Sse r0 - r3 transfer the first four parameters, use stack transfer the more than four parameters.
+	 * when use stack, the last parameter is pushed onto the stack first, and then the other parameters
+	 * are sequentially pushed onto the stack from back to front.
+	 * When executing the target algorithm function, the fifth parameter first pops up from the stack.
+	 * To ensure the correct operation of the target algorithm function, it is best to confirm the storage
+	 * location of the parameters in the .lst file of the target algorithm function.
+	 * Tips: The target algorithm function need to be set to __attribute__((naked)) to ensure that the compiler
+	 * does not generate any function entry and exit codes, so the programmer can control the all operation 
+	 * of the stack independently.
+	 * Additionally, it is possible to store data at a fixed address on the target RAM and read the data
+	 * at that address in the target algorithm function. However, this is not in line with the general 
+	 * application of functions
+	 */
 	struct reg_param reg_params[5];
 
 	init_reg_param(&reg_params[0], "r0", 32, PARAM_IN_OUT);	/* Flash register base address and return value */
@@ -789,16 +803,19 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 
 	struct mem_param mem_params[1];
 
-	/* set sp address to stack area top in order to transfer r4(count) value to target algorithm function fifth participant */
-	init_mem_param(&mem_params[0], write_algorithm_stack->address + CH32F2X_WRITE_ALGORITHM_STACK, 32, PARAM_OUT);	
+	uint32_t stack_top_address;
+	/* set stack top 8 byte align */
+	stack_top_address = (write_algorithm_stack->address + CH32F2X_WRITE_ALGORITHM_STACK) & ~0x07;
+	/* push target algorithm function last parameter to stack */
+	init_mem_param(&mem_params[0], stack_top_address - 4, 32, PARAM_OUT);
+	/* save last parameter value to current stack point position */	
+	buf_set_u32(mem_params[0].value, 0, 32, hwords_count);
 
 	buf_set_u32(reg_params[0].value, 0, 32, ch32f2x_info->register_base);
 	buf_set_u32(reg_params[1].value, 0, 32, source->address);
 	buf_set_u32(reg_params[2].value, 0, 32, source->address + source->size);
 	buf_set_u32(reg_params[3].value, 0, 32, address);
-	buf_set_u32(reg_params[4].value, 0, 32, write_algorithm_stack->address + CH32F2X_WRITE_ALGORITHM_STACK);
-
-	buf_set_u32(mem_params[0].value, 0, 32, hwords_count);
+	buf_set_u32(reg_params[4].value, 0, 32, stack_top_address - 4);
 
 	armv7m_info.common_magic = ARMV7M_COMMON_MAGIC;
 	armv7m_info.core_mode = ARM_MODE_THREAD;
