@@ -578,7 +578,7 @@ static int armv4_5_get_core_reg(struct reg *reg)
 	struct target *target = reg_arch_info->target;
 
 	if (target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -600,7 +600,7 @@ static int armv4_5_set_core_reg(struct reg *reg, uint8_t *buf)
 	uint32_t value = buf_get_u32(buf, 0, 32);
 
 	if (target->state != TARGET_HALTED) {
-		LOG_ERROR("Target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -817,8 +817,8 @@ COMMAND_HANDLER(handle_armv4_5_reg_command)
 	}
 
 	if (target->state != TARGET_HALTED) {
-		command_print(CMD, "error: target must be halted for register accesses");
-		return ERROR_FAIL;
+		command_print(CMD, "Error: target must be halted for register accesses");
+		return ERROR_TARGET_NOT_HALTED;
 	}
 
 	if (arm->core_type != ARM_CORE_TYPE_STD) {
@@ -833,7 +833,7 @@ COMMAND_HANDLER(handle_armv4_5_reg_command)
 	}
 
 	if (!arm->full_context) {
-		command_print(CMD, "error: target doesn't support %s",
+		command_print(CMD, "Error: target doesn't support %s",
 			CMD_NAME);
 		return ERROR_FAIL;
 	}
@@ -1018,8 +1018,10 @@ COMMAND_HANDLER(handle_armv4_5_mcrmrc)
 		return ERROR_FAIL;
 	}
 
-	if (target->state != TARGET_HALTED)
+	if (target->state != TARGET_HALTED) {
+		command_print(CMD, "Error: [%s] not halted", target_name(target));
 		return ERROR_TARGET_NOT_HALTED;
+	}
 
 	int cpnum;
 	uint32_t op1;
@@ -1091,6 +1093,94 @@ COMMAND_HANDLER(handle_armv4_5_mcrmrc)
 	return ERROR_OK;
 }
 
+COMMAND_HANDLER(handle_armv4_5_mcrrmrrc)
+{
+	bool is_mcrr = false;
+	unsigned int arg_cnt = 3;
+
+	if (!strcmp(CMD_NAME, "mcrr")) {
+		is_mcrr = true;
+		arg_cnt = 4;
+	}
+
+	if (arg_cnt != CMD_ARGC)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	struct target *target = get_current_target(CMD_CTX);
+	if (!target) {
+		command_print(CMD, "no current target");
+		return ERROR_FAIL;
+	}
+	if (!target_was_examined(target)) {
+		command_print(CMD, "%s: not yet examined", target_name(target));
+		return ERROR_TARGET_NOT_EXAMINED;
+	}
+
+	struct arm *arm = target_to_arm(target);
+	if (!is_arm(arm)) {
+		command_print(CMD, "%s: not an ARM", target_name(target));
+		return ERROR_FAIL;
+	}
+
+	if (target->state != TARGET_HALTED)
+		return ERROR_TARGET_NOT_HALTED;
+
+	int cpnum;
+	uint32_t op1;
+	uint32_t crm;
+	uint64_t value;
+
+	/* NOTE:  parameter sequence matches ARM instruction set usage:
+	 *	MCRR	pNUM, op1, rX1, rX2, CRm	; write CP from rX1 and rX2
+	 *	MREC	pNUM, op1, rX1, rX2, CRm	; read CP into rX1 and rX2
+	 * The "rXn" are necessarily omitted; they use Tcl mechanisms.
+	 */
+	COMMAND_PARSE_NUMBER(int, CMD_ARGV[0], cpnum);
+	if (cpnum & ~0xf) {
+		command_print(CMD, "coprocessor %d out of range", cpnum);
+		return ERROR_COMMAND_ARGUMENT_INVALID;
+	}
+
+	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[1], op1);
+	if (op1 & ~0xf) {
+		command_print(CMD, "op1 %d out of range", op1);
+		return ERROR_COMMAND_ARGUMENT_INVALID;
+	}
+
+	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[2], crm);
+	if (crm & ~0xf) {
+		command_print(CMD, "CRm %d out of range", crm);
+		return ERROR_COMMAND_ARGUMENT_INVALID;
+	}
+
+	/*
+	 * FIXME change the call syntax here ... simplest to just pass
+	 * the MRC() or MCR() instruction to be executed.  That will also
+	 * let us support the "mrrc2" and "mcrr2" opcodes (toggling one bit)
+	 * if that's ever needed.
+	 */
+	if (is_mcrr) {
+		COMMAND_PARSE_NUMBER(u64, CMD_ARGV[3], value);
+
+		/* NOTE: parameters reordered! */
+		/* ARMV5_T_MCRR(cpnum, op1, crm) */
+		int retval = arm->mcrr(target, cpnum, op1, crm, value);
+		if (retval != ERROR_OK)
+			return retval;
+	} else {
+		value = 0;
+		/* NOTE: parameters reordered! */
+		/* ARMV5_T_MRRC(cpnum, op1, crm) */
+		int retval = arm->mrrc(target, cpnum, op1, crm, &value);
+		if (retval != ERROR_OK)
+			return retval;
+
+		command_print(CMD, "0x%" PRIx64, value);
+	}
+
+	return ERROR_OK;
+}
+
 static const struct command_registration arm_exec_command_handlers[] = {
 	{
 		.name = "reg",
@@ -1112,6 +1202,20 @@ static const struct command_registration arm_exec_command_handlers[] = {
 		.handler = handle_armv4_5_mcrmrc,
 		.help = "read coprocessor register",
 		.usage = "cpnum op1 CRn CRm op2",
+	},
+	{
+		.name = "mcrr",
+		.mode = COMMAND_EXEC,
+		.handler = handle_armv4_5_mcrrmrrc,
+		.help = "write coprocessor 64-bit register",
+		.usage = "cpnum op1 CRm value",
+	},
+	{
+		.name = "mrrc",
+		.mode = COMMAND_EXEC,
+		.handler = handle_armv4_5_mcrrmrrc,
+		.help = "read coprocessor 64-bit register",
+		.usage = "cpnum op1 CRm",
 	},
 	{
 		.chain = arm_all_profiles_command_handlers,
@@ -1307,7 +1411,7 @@ int armv4_5_run_algorithm_inner(struct target *target,
 	}
 
 	if (target->state != TARGET_HALTED) {
-		LOG_WARNING("target not halted");
+		LOG_TARGET_ERROR(target, "not halted (run target algo)");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -1667,12 +1771,28 @@ static int arm_default_mrc(struct target *target, int cpnum,
 	return ERROR_FAIL;
 }
 
+static int arm_default_mrrc(struct target *target, int cpnum,
+	uint32_t op, uint32_t crm,
+	uint64_t *value)
+{
+	LOG_ERROR("%s doesn't implement MRRC", target_type_name(target));
+	return ERROR_FAIL;
+}
+
 static int arm_default_mcr(struct target *target, int cpnum,
 	uint32_t op1, uint32_t op2,
 	uint32_t crn, uint32_t crm,
 	uint32_t value)
 {
 	LOG_ERROR("%s doesn't implement MCR", target_type_name(target));
+	return ERROR_FAIL;
+}
+
+static int arm_default_mcrr(struct target *target, int cpnum,
+	uint32_t op, uint32_t crm,
+	uint64_t value)
+{
+	LOG_ERROR("%s doesn't implement MCRR", target_type_name(target));
 	return ERROR_FAIL;
 }
 
@@ -1695,8 +1815,12 @@ int arm_init_arch_info(struct target *target, struct arm *arm)
 
 	if (!arm->mrc)
 		arm->mrc = arm_default_mrc;
+	if (!arm->mrrc)
+		arm->mrrc = arm_default_mrrc;
 	if (!arm->mcr)
 		arm->mcr = arm_default_mcr;
+	if (!arm->mcrr)
+		arm->mcrr = arm_default_mcrr;
 
 	return ERROR_OK;
 }

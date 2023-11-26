@@ -1096,7 +1096,7 @@ int xtensa_assert_reset(struct target *target)
 {
 	struct xtensa *xtensa = target_to_xtensa(target);
 
-	LOG_TARGET_DEBUG(target, "target_number=%i, begin", target->target_number);
+	LOG_TARGET_DEBUG(target, " begin");
 	xtensa_queue_pwr_reg_write(xtensa,
 		XDMREG_PWRCTL,
 		PWRCTL_JTAGDEBUGUSE(xtensa) | PWRCTL_DEBUGWAKEUP(xtensa) | PWRCTL_MEMWAKEUP(xtensa) |
@@ -1541,7 +1541,7 @@ int xtensa_prepare_resume(struct target *target,
 		debug_execution);
 
 	if (target->state != TARGET_HALTED) {
-		LOG_TARGET_WARNING(target, "target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 	xtensa->halt_request = false;
@@ -1667,7 +1667,7 @@ int xtensa_do_step(struct target *target, int current, target_addr_t address, in
 		current, address, handle_breakpoints);
 
 	if (target->state != TARGET_HALTED) {
-		LOG_TARGET_WARNING(target, "target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -1941,7 +1941,7 @@ int xtensa_read_memory(struct target *target, target_addr_t address, uint32_t si
 	bool bswap = xtensa->target->endianness == TARGET_BIG_ENDIAN;
 
 	if (target->state != TARGET_HALTED) {
-		LOG_TARGET_WARNING(target, "target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -2037,7 +2037,7 @@ int xtensa_write_memory(struct target *target,
 	bool fill_head_tail = false;
 
 	if (target->state != TARGET_HALTED) {
-		LOG_TARGET_WARNING(target, "target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -2566,11 +2566,11 @@ int xtensa_watchpoint_add(struct target *target, struct watchpoint *watchpoint)
 	xtensa_reg_val_t dbreakcval;
 
 	if (target->state != TARGET_HALTED) {
-		LOG_TARGET_WARNING(target, "target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
-	if (watchpoint->mask != ~(uint32_t)0) {
+	if (watchpoint->mask != WATCHPOINT_IGNORE_DATA_VALUE_MASK) {
 		LOG_TARGET_ERROR(target, "watchpoint value masks not supported");
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	}
@@ -3978,6 +3978,38 @@ COMMAND_HANDLER(xtensa_cmd_smpbreak)
 		get_current_target(CMD_CTX));
 }
 
+COMMAND_HELPER(xtensa_cmd_dm_rw_do, struct xtensa *xtensa)
+{
+	if (CMD_ARGC == 1) {
+		// read: xtensa dm addr
+		uint32_t addr = strtoul(CMD_ARGV[0], NULL, 0);
+		uint32_t val;
+		int res = xtensa_dm_read(&xtensa->dbg_mod, addr, &val);
+		if (res == ERROR_OK)
+			command_print(CMD, "xtensa DM(0x%08" PRIx32 ") -> 0x%08" PRIx32, addr, val);
+		else
+			command_print(CMD, "xtensa DM(0x%08" PRIx32 ") : read ERROR %" PRId32, addr, res);
+		return res;
+	} else if (CMD_ARGC == 2) {
+		// write: xtensa dm addr value
+		uint32_t addr = strtoul(CMD_ARGV[0], NULL, 0);
+		uint32_t val = strtoul(CMD_ARGV[1], NULL, 0);
+		int res = xtensa_dm_write(&xtensa->dbg_mod, addr, val);
+		if (res == ERROR_OK)
+			command_print(CMD, "xtensa DM(0x%08" PRIx32 ") <- 0x%08" PRIx32, addr, val);
+		else
+			command_print(CMD, "xtensa DM(0x%08" PRIx32 ") : write ERROR %" PRId32, addr, res);
+		return res;
+	}
+	return ERROR_COMMAND_SYNTAX_ERROR;
+}
+
+COMMAND_HANDLER(xtensa_cmd_dm_rw)
+{
+	return CALL_COMMAND_HANDLER(xtensa_cmd_dm_rw_do,
+		target_to_xtensa(get_current_target(CMD_CTX)));
+}
+
 COMMAND_HELPER(xtensa_cmd_tracestart_do, struct xtensa *xtensa)
 {
 	struct xtensa_trace_status trace_status;
@@ -4233,6 +4265,13 @@ static const struct command_registration xtensa_any_command_handlers[] = {
 		.mode = COMMAND_ANY,
 		.help = "Set the way the CPU chains OCD breaks",
 		.usage = "[none|breakinout|runstall] | [BreakIn] [BreakOut] [RunStallIn] [DebugModeOut]",
+	},
+	{
+		.name = "dm",
+		.handler = xtensa_cmd_dm_rw,
+		.mode = COMMAND_ANY,
+		.help = "Xtensa DM read/write",
+		.usage = "addr [value]"
 	},
 	{
 		.name = "perfmon_enable",

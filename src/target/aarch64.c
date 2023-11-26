@@ -105,7 +105,7 @@ static int aarch64_restore_system_control_reg(struct target *target)
 		if (target_mode != ARM_MODE_ANY)
 			armv8_dpm_modeswitch(&armv8->dpm, target_mode);
 
-		retval = armv8->dpm.instr_write_data_r0(&armv8->dpm, instr, aarch64->system_control_reg);
+		retval = armv8->dpm.instr_write_data_r0_64(&armv8->dpm, instr, aarch64->system_control_reg);
 		if (retval != ERROR_OK)
 			return retval;
 
@@ -182,7 +182,7 @@ static int aarch64_mmu_modify(struct target *target, int enable)
 	if (target_mode != ARM_MODE_ANY)
 		armv8_dpm_modeswitch(&armv8->dpm, target_mode);
 
-	retval = armv8->dpm.instr_write_data_r0(&armv8->dpm, instr,
+	retval = armv8->dpm.instr_write_data_r0_64(&armv8->dpm, instr,
 				aarch64->system_control_reg_curr);
 
 	if (target_mode != ARM_MODE_ANY)
@@ -846,8 +846,10 @@ static int aarch64_resume(struct target *target, int current,
 	struct armv8_common *armv8 = target_to_armv8(target);
 	armv8->last_run_control_op = ARMV8_RUNCONTROL_RESUME;
 
-	if (target->state != TARGET_HALTED)
+	if (target->state != TARGET_HALTED) {
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
+	}
 
 	/*
 	 * If this target is part of a SMP group, prepare the others
@@ -1053,14 +1055,14 @@ static int aarch64_post_debug_entry(struct target *target)
 	if (target_mode != ARM_MODE_ANY)
 		armv8_dpm_modeswitch(&armv8->dpm, target_mode);
 
-	retval = armv8->dpm.instr_read_data_r0(&armv8->dpm, instr, &aarch64->system_control_reg);
+	retval = armv8->dpm.instr_read_data_r0_64(&armv8->dpm, instr, &aarch64->system_control_reg);
 	if (retval != ERROR_OK)
 		return retval;
 
 	if (target_mode != ARM_MODE_ANY)
 		armv8_dpm_modeswitch(&armv8->dpm, ARM_MODE_ANY);
 
-	LOG_DEBUG("System_register: %8.8" PRIx32, aarch64->system_control_reg);
+	LOG_DEBUG("System_register: %8.8" PRIx64, aarch64->system_control_reg);
 	aarch64->system_control_reg_curr = aarch64->system_control_reg;
 
 	if (armv8->armv8_mmu.armv8_cache.info == -1) {
@@ -1089,13 +1091,14 @@ static int aarch64_step(struct target *target, int current, target_addr_t addres
 	struct armv8_common *armv8 = target_to_armv8(target);
 	struct aarch64_common *aarch64 = target_to_aarch64(target);
 	int saved_retval = ERROR_OK;
+	int poll_retval;
 	int retval;
 	uint32_t edecr;
 
 	armv8->last_run_control_op = ARMV8_RUNCONTROL_STEP;
 
 	if (target->state != TARGET_HALTED) {
-		LOG_WARNING("target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -1171,6 +1174,8 @@ static int aarch64_step(struct target *target, int current, target_addr_t addres
 	if (retval == ERROR_TARGET_TIMEOUT)
 		saved_retval = aarch64_halt_one(target, HALT_SYNC);
 
+	poll_retval = aarch64_poll(target);
+
 	/* restore EDECR */
 	retval = mem_ap_write_atomic_u32(armv8->debug_ap,
 			armv8->debug_base + CPUV8_DBG_EDECR, edecr);
@@ -1186,6 +1191,9 @@ static int aarch64_step(struct target *target, int current, target_addr_t addres
 
 	if (saved_retval != ERROR_OK)
 		return saved_retval;
+
+	if (poll_retval != ERROR_OK)
+		return poll_retval;
 
 	return ERROR_OK;
 }
@@ -2039,6 +2047,11 @@ static int aarch64_write_cpu_memory_slow(struct target *target,
 	struct arm *arm = &armv8->arm;
 	int retval;
 
+	if (size > 4 && arm->core_state != ARM_STATE_AARCH64) {
+		LOG_ERROR("memory write sizes greater than 4 bytes is only supported for AArch64 state");
+		return ERROR_FAIL;
+	}
+
 	armv8_reg_current(arm, 1)->dirty = true;
 
 	/* change DCC to normal mode if necessary */
@@ -2051,22 +2064,32 @@ static int aarch64_write_cpu_memory_slow(struct target *target,
 	}
 
 	while (count) {
-		uint32_t data, opcode;
+		uint32_t opcode;
+		uint64_t data;
 
-		/* write the data to store into DTRRX */
+		/* write the data to store into DTRRX (and DTRTX for 64-bit) */
 		if (size == 1)
 			data = *buffer;
 		else if (size == 2)
 			data = target_buffer_get_u16(target, buffer);
-		else
+		else if (size == 4)
 			data = target_buffer_get_u32(target, buffer);
+		else
+			data = target_buffer_get_u64(target, buffer);
+
 		retval = mem_ap_write_atomic_u32(armv8->debug_ap,
-				armv8->debug_base + CPUV8_DBG_DTRRX, data);
+				armv8->debug_base + CPUV8_DBG_DTRRX, (uint32_t)data);
+		if (retval == ERROR_OK && size > 4)
+			retval = mem_ap_write_atomic_u32(armv8->debug_ap,
+					armv8->debug_base + CPUV8_DBG_DTRTX, (uint32_t)(data >> 32));
 		if (retval != ERROR_OK)
 			return retval;
 
 		if (arm->core_state == ARM_STATE_AARCH64)
-			retval = dpm->instr_execute(dpm, ARMV8_MRS(SYSTEM_DBG_DTRRX_EL0, 1));
+			if (size <= 4)
+				retval = dpm->instr_execute(dpm, ARMV8_MRS(SYSTEM_DBG_DTRRX_EL0, 1));
+			else
+				retval = dpm->instr_execute(dpm, ARMV8_MRS(SYSTEM_DBG_DBGDTR_EL0, 1));
 		else
 			retval = dpm->instr_execute(dpm, ARMV4_5_MRC(14, 0, 1, 0, 5, 0));
 		if (retval != ERROR_OK)
@@ -2076,8 +2099,11 @@ static int aarch64_write_cpu_memory_slow(struct target *target,
 			opcode = armv8_opcode(armv8, ARMV8_OPC_STRB_IP);
 		else if (size == 2)
 			opcode = armv8_opcode(armv8, ARMV8_OPC_STRH_IP);
-		else
+		else if (size == 4)
 			opcode = armv8_opcode(armv8, ARMV8_OPC_STRW_IP);
+		else
+			opcode = armv8_opcode(armv8, ARMV8_OPC_STRD_IP);
+
 		retval = dpm->instr_execute(dpm, opcode);
 		if (retval != ERROR_OK)
 			return retval;
@@ -2135,7 +2161,7 @@ static int aarch64_write_cpu_memory(struct target *target,
 	uint32_t dscr;
 
 	if (target->state != TARGET_HALTED) {
-		LOG_WARNING("target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -2218,6 +2244,11 @@ static int aarch64_read_cpu_memory_slow(struct target *target,
 	struct arm *arm = &armv8->arm;
 	int retval;
 
+	if (size > 4 && arm->core_state != ARM_STATE_AARCH64) {
+		LOG_ERROR("memory read sizes greater than 4 bytes is only supported for AArch64 state");
+		return ERROR_FAIL;
+	}
+
 	armv8_reg_current(arm, 1)->dirty = true;
 
 	/* change DCC to normal mode (if necessary) */
@@ -2230,36 +2261,56 @@ static int aarch64_read_cpu_memory_slow(struct target *target,
 	}
 
 	while (count) {
-		uint32_t opcode, data;
+		uint32_t opcode;
+		uint32_t lower;
+		uint32_t higher;
+		uint64_t data;
 
 		if (size == 1)
 			opcode = armv8_opcode(armv8, ARMV8_OPC_LDRB_IP);
 		else if (size == 2)
 			opcode = armv8_opcode(armv8, ARMV8_OPC_LDRH_IP);
-		else
+		else if (size == 4)
 			opcode = armv8_opcode(armv8, ARMV8_OPC_LDRW_IP);
+		else
+			opcode = armv8_opcode(armv8, ARMV8_OPC_LDRD_IP);
+
 		retval = dpm->instr_execute(dpm, opcode);
 		if (retval != ERROR_OK)
 			return retval;
 
 		if (arm->core_state == ARM_STATE_AARCH64)
-			retval = dpm->instr_execute(dpm, ARMV8_MSR_GP(SYSTEM_DBG_DTRTX_EL0, 1));
+			if (size <= 4)
+				retval = dpm->instr_execute(dpm, ARMV8_MSR_GP(SYSTEM_DBG_DTRTX_EL0, 1));
+			else
+				retval = dpm->instr_execute(dpm, ARMV8_MSR_GP(SYSTEM_DBG_DBGDTR_EL0, 1));
 		else
 			retval = dpm->instr_execute(dpm, ARMV4_5_MCR(14, 0, 1, 0, 5, 0));
 		if (retval != ERROR_OK)
 			return retval;
 
 		retval = mem_ap_read_atomic_u32(armv8->debug_ap,
-				armv8->debug_base + CPUV8_DBG_DTRTX, &data);
+				armv8->debug_base + CPUV8_DBG_DTRTX, &lower);
+		if (retval == ERROR_OK) {
+			if (size > 4)
+				retval = mem_ap_read_atomic_u32(armv8->debug_ap,
+						armv8->debug_base + CPUV8_DBG_DTRRX, &higher);
+			else
+				higher = 0;
+		}
 		if (retval != ERROR_OK)
 			return retval;
+
+		data = (uint64_t)lower | (uint64_t)higher << 32;
 
 		if (size == 1)
 			*buffer = (uint8_t)data;
 		else if (size == 2)
 			target_buffer_set_u16(target, buffer, (uint16_t)data);
+		else if (size == 4)
+			target_buffer_set_u32(target, buffer, (uint32_t)data);
 		else
-			target_buffer_set_u32(target, buffer, data);
+			target_buffer_set_u64(target, buffer, data);
 
 		/* Advance */
 		buffer += size;
@@ -2353,7 +2404,7 @@ static int aarch64_read_cpu_memory(struct target *target,
 			address, size, count);
 
 	if (target->state != TARGET_HALTED) {
-		LOG_WARNING("target not halted");
+		LOG_TARGET_ERROR(target, "not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
@@ -2693,6 +2744,9 @@ static int aarch64_examine(struct target *target)
 	if (retval == ERROR_OK)
 		retval = aarch64_init_debug_access(target);
 
+	if (retval == ERROR_OK)
+		retval = aarch64_poll(target);
+
 	return retval;
 }
 
@@ -2790,8 +2844,8 @@ static int aarch64_mmu(struct target *target, int *enabled)
 	struct aarch64_common *aarch64 = target_to_aarch64(target);
 	struct armv8_common *armv8 = &aarch64->armv8_common;
 	if (target->state != TARGET_HALTED) {
-		LOG_ERROR("%s: target %s not halted", __func__, target_name(target));
-		return ERROR_TARGET_INVALID;
+		LOG_TARGET_ERROR(target, "not halted");
+		return ERROR_TARGET_NOT_HALTED;
 	}
 	if (armv8->is_armv8r)
 		*enabled = 0;
@@ -3010,8 +3064,10 @@ COMMAND_HANDLER(aarch64_mcrmrc_command)
 		return ERROR_FAIL;
 	}
 
-	if (target->state != TARGET_HALTED)
+	if (target->state != TARGET_HALTED) {
+		command_print(CMD, "Error: [%s] not halted", target_name(target));
 		return ERROR_TARGET_NOT_HALTED;
+	}
 
 	if (arm->core_state == ARM_STATE_AARCH64) {
 		command_print(CMD, "%s: not 32-bit arm target", target_name(target));
