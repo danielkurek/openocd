@@ -15,6 +15,8 @@
 #include "raw_bit.h"
 
 #define JTAG_CONFIGURE  0x06
+#define JTAG_SPI_BYPASS 0x05
+#define BYPASS          0x3F
 
 struct gatemate_pld_device {
 	struct jtag_tap *tap;
@@ -209,22 +211,81 @@ static int gatemate_load(struct pld_device *pld_device, const char *filename)
 	return retval;
 }
 
-PLD_DEVICE_COMMAND_HANDLER(gatemate_pld_device_command)
+static int gatemate_has_jtagspi_instruction(struct pld_device *device, bool *has_instruction)
 {
-	struct jtag_tap *tap;
+	*has_instruction = true;
+	return ERROR_OK;
+}
 
-	struct gatemate_pld_device *gatemate_info;
+static int gatemate_connect_spi_to_jtag(struct pld_device *pld_device)
+{
+	if (!pld_device)
+		return ERROR_FAIL;
 
-	if (CMD_ARGC != 2)
+	struct gatemate_pld_device *pld_device_info = pld_device->driver_priv;
+	if (!pld_device_info)
+		return ERROR_FAIL;
+
+	struct jtag_tap *tap = pld_device_info->tap;
+	if (!tap)
+		return ERROR_FAIL;
+
+	if (buf_get_u32(tap->cur_instr, 0, tap->ir_length) == JTAG_SPI_BYPASS)
+		return ERROR_OK;
+
+	gatemate_set_instr(tap, JTAG_SPI_BYPASS);
+
+	return jtag_execute_queue();
+}
+
+static int gatemate_disconnect_spi_from_jtag(struct pld_device *pld_device)
+{
+	if (!pld_device)
+		return ERROR_FAIL;
+
+	struct gatemate_pld_device *pld_device_info = pld_device->driver_priv;
+	if (!pld_device_info)
+		return ERROR_FAIL;
+
+	struct jtag_tap *tap = pld_device_info->tap;
+	if (!tap)
+		return ERROR_FAIL;
+
+	if (buf_get_u32(tap->cur_instr, 0, tap->ir_length) != JTAG_SPI_BYPASS)
+		return ERROR_OK;
+
+	gatemate_set_instr(tap, BYPASS);
+
+	return jtag_execute_queue();
+}
+
+static int gatemate_get_stuff_bits(struct pld_device *pld_device, unsigned int *facing_read_bits,
+									unsigned int *trailing_write_bits)
+{
+	if (!pld_device)
+		return ERROR_FAIL;
+
+	*facing_read_bits = 1;
+	*trailing_write_bits = 1;
+
+	return ERROR_OK;
+}
+
+PLD_CREATE_COMMAND_HANDLER(gatemate_pld_create_command)
+{
+	if (CMD_ARGC != 4)
 		return ERROR_COMMAND_SYNTAX_ERROR;
 
-	tap = jtag_tap_by_string(CMD_ARGV[1]);
+	if (strcmp(CMD_ARGV[2], "-chain-position") != 0)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	struct jtag_tap *tap = jtag_tap_by_string(CMD_ARGV[3]);
 	if (!tap) {
-		command_print(CMD, "Tap: %s does not exist", CMD_ARGV[1]);
+		command_print(CMD, "Tap: %s does not exist", CMD_ARGV[3]);
 		return ERROR_FAIL;
 	}
 
-	gatemate_info = malloc(sizeof(struct gatemate_pld_device));
+	struct gatemate_pld_device *gatemate_info = malloc(sizeof(struct gatemate_pld_device));
 	if (!gatemate_info) {
 		LOG_ERROR("Out of memory");
 		return ERROR_FAIL;
@@ -238,6 +299,10 @@ PLD_DEVICE_COMMAND_HANDLER(gatemate_pld_device_command)
 
 struct pld_driver gatemate_pld = {
 	.name = "gatemate",
-	.pld_device_command = &gatemate_pld_device_command,
+	.pld_create_command = &gatemate_pld_create_command,
 	.load = &gatemate_load,
+	.has_jtagspi_instruction = gatemate_has_jtagspi_instruction,
+	.connect_spi_to_jtag = gatemate_connect_spi_to_jtag,
+	.disconnect_spi_from_jtag = gatemate_disconnect_spi_from_jtag,
+	.get_stuff_bits = gatemate_get_stuff_bits,
 };
