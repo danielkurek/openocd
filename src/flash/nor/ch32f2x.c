@@ -734,6 +734,7 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 
 	retval = target_write_buffer(target, write_algorithm->address,
 			sizeof(ch32f2x_flash_write_code), ch32f2x_flash_write_code);
+	LOG_WARNING("using working area 0x%lx with size 0x%lx", write_algorithm->address, sizeof(ch32f2x_flash_write_code));
 	if (retval != ERROR_OK) {
 		target_free_working_area(target, write_algorithm);
 		return retval;
@@ -817,6 +818,8 @@ static int ch32f2x_write_block_async(struct flash_bank *bank, const uint8_t *buf
 	buf_set_u32(reg_params[3].value, 0, 32, address);
 	buf_set_u32(reg_params[4].value, 0, 32, stack_top_address - 4);
 
+	LOG_WARNING("params: reg_base=%x, buffer_start=%lx, buffer_end=%lx, target_addr=%x, hwords_count_addr=%x, hwords_count=%x", ch32f2x_info->register_base, source->address, source->address + source->size, address, stack_top_address - 4, hwords_count);
+
 	armv7m_info.common_magic = ARMV7M_COMMON_MAGIC;
 	armv7m_info.core_mode = ARM_MODE_THREAD;
 
@@ -875,6 +878,7 @@ static int ch32f2x_write_block(struct flash_bank *bank,
 	if (is_arm(arm)) {
 		/* try using a block write - on ARM architecture or... */
 		retval = ch32f2x_write_block_async(bank, buffer, address, hwords_count);
+		// retval = ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 	} else {
 		/* ... RISC-V architecture */
 		LOG_ERROR("RISC-V is currently not supported");
@@ -974,7 +978,8 @@ static int ch32f2x_get_property_addr(struct target *target, struct ch32f2x_prope
 		return ERROR_TARGET_NOT_EXAMINED;
 	}
 
-	switch (cortex_m_get_partno_safe(target)) {
+	// switch (cortex_m_get_partno_safe(target)) {
+	switch (cortex_m_get_impl_part(target)) {
 		case CORTEX_M3_PARTNO:
 			addr->device_id = CH32F2X_IDCODE_BASE;
 			addr->flash_size = CH32F2X_FLASH_INFO;
@@ -1077,6 +1082,7 @@ static int ch32f2x_probe(struct flash_bank *bank)
 
 	/* set page size, protection granularity and max flash size depending on family */
 	switch (device_id) {
+		case 0x41c:
 		case 0x418: 
 			page_size = CH32F2X_FLASH_PAGE_SIZE;
 			ch32f2x_info->ppage_size = CH32F2X_FLASH_SECTOR_KB * 1024 / CH32F2X_FLASH_PAGE_SIZE;

@@ -26,6 +26,7 @@
  *   andreas.fritiofson@gmail.com                                          *
  ***************************************************************************/
 
+#include <stdint.h>
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -942,7 +943,8 @@ int target_run_flash_async_algorithm(struct target *target,
 	 * rest is fifo data area. */
 	uint32_t wp_addr = buffer_start;
 	uint32_t rp_addr = buffer_start + 4;
-	uint32_t fifo_start_addr = buffer_start + 8;
+	uint32_t debug_addr = buffer_start + 8;
+	uint32_t fifo_start_addr = buffer_start + 8 + 4;
 	uint32_t fifo_end_addr = buffer_start + buffer_size;
 
 	uint32_t wp = fifo_start_addr;
@@ -970,6 +972,14 @@ int target_run_flash_async_algorithm(struct target *target,
 		return retval;
 	}
 
+	struct reg *reg = register_get_by_name(target->reg_cache, "pc", true);
+	uint32_t pc = buf_get_u32(reg->value, 0, 32);
+	LOG_DEBUG("PC: %0x", pc);
+	retval = target_write_u32(target, 0xE0042004, 0x300);
+	if (retval != ERROR_OK)
+		return retval;
+
+	uint32_t dbgmcu, debug = 0;
 	while (count > 0) {
 
 		retval = target_read_u32(target, rp_addr, &rp);
@@ -978,8 +988,27 @@ int target_run_flash_async_algorithm(struct target *target,
 			break;
 		}
 
-		LOG_DEBUG("offs 0x%zx count 0x%" PRIx32 " wp 0x%" PRIx32 " rp 0x%" PRIx32,
-			(size_t) (buffer - buffer_orig), count, wp, rp);
+		retval = target_read_u32(target, debug_addr, &debug);
+		if (retval != ERROR_OK) {
+			LOG_ERROR("failed to get debug value");
+			break;
+		}
+
+		LOG_DEBUG("offs 0x%zx count 0x%" PRIx32 " wp 0x%" PRIx32 " rp 0x%" PRIx32 " debug 0x%" PRIx32,
+			(size_t) (buffer - buffer_orig), count, wp, rp, debug);
+		
+		reg = register_get_by_name(target->reg_cache, "pc", true);
+		pc = buf_get_u32(reg->value, 0, 32);
+		LOG_DEBUG("PC: %0x", pc);
+		 
+		retval = target_read_u32(target, 0xE0042004, &dbgmcu);
+		if (retval != ERROR_OK) {
+			LOG_ERROR("failed to get DBGMCU_CR");
+			break;
+		}
+
+		LOG_DEBUG("DBGMCU_CR %" PRIx32, dbgmcu);
+		
 
 		if (rp == 0) {
 			LOG_ERROR("flash write algorithm aborted by target");
@@ -1032,8 +1061,10 @@ int target_run_flash_async_algorithm(struct target *target,
 
 		/* Write data to fifo */
 		retval = target_write_buffer(target, wp, thisrun_bytes, buffer);
-		if (retval != ERROR_OK)
+		if (retval != ERROR_OK){
+			LOG_ERROR("error writing to FIFO");
 			break;
+		}
 
 		/* Update counters and wrap write pointer */
 		buffer += thisrun_bytes;
@@ -1044,8 +1075,12 @@ int target_run_flash_async_algorithm(struct target *target,
 
 		/* Store updated write pointer to target */
 		retval = target_write_u32(target, wp_addr, wp);
-		if (retval != ERROR_OK)
+		if (retval != ERROR_OK){
+			LOG_ERROR("error updating wp pointer");
 			break;
+		}
+
+		LOG_INFO("count=%" PRIx32, count);
 
 		/* Avoid GDB timeouts */
 		keep_alive();
@@ -1055,6 +1090,20 @@ int target_run_flash_async_algorithm(struct target *target,
 		/* abort flash write algorithm on target */
 		target_write_u32(target, wp_addr, 0);
 	}
+
+	// for(uint32_t i = 0; i < 32756; i++){
+	// 	retval = target_read_u32(target, rp_addr, &rp);
+	// 	if (retval != ERROR_OK) {
+	// 		LOG_ERROR("failed to get read pointer");
+	// 		break;
+	// 	}
+	// 	retval = target_read_u32(target, debug_addr, &debug);
+	// 	if (retval != ERROR_OK) {
+	// 		LOG_ERROR("failed to get debug value");
+	// 		break;
+	// 	}
+	// 	LOG_DEBUG("rp=0x%" PRIx32 " debug=0x%" PRIx32, rp, debug);
+	// }
 
 	int retval2 = target_wait_algorithm(target, num_mem_params, mem_params,
 			num_reg_params, reg_params,
@@ -3821,30 +3870,39 @@ static COMMAND_HELPER(handle_verify_image_command_internal, enum verify_mode ver
 				uint8_t *data;
 
 				if (diffs == 0)
-					LOG_ERROR("checksum mismatch - attempting binary compare");
+					LOG_ERROR("checksum mismatch - attempting binary compare (file checksum=0x%"PRIx32" flashed checksum=0x%" PRIx32")", checksum, mem_checksum);
 
 				data = malloc(buf_cnt);
 
 				retval = target_read_buffer(target, image.sections[i].base_address, buf_cnt, data);
+				LOG_INFO("Reading at 0x%" PRIx64 " size=%lu", image.sections[i].base_address, buf_cnt);
 				if (retval == ERROR_OK) {
+					LOG_ERROR("Read OK, finding diffs");
 					uint32_t t;
 					for (t = 0; t < buf_cnt; t++) {
+						LOG_INFO("checking buffer %"PRIu32"/%lu", t, buf_cnt);
 						if (data[t] != buffer[t]) {
+							LOG_INFO("buffer[%"PRIu32"] differ", t);
 							command_print(CMD,
 										  "diff %d address 0x%08x. Was 0x%02x instead of 0x%02x",
 										  diffs,
 										  (unsigned)(t + image.sections[i].base_address),
 										  data[t],
 										  buffer[t]);
-							if (diffs++ >= 127) {
-								command_print(CMD, "More than 128 errors, the rest are not printed.");
-								free(data);
-								free(buffer);
-								goto done;
-							}
+							LOG_INFO("diffs: %d", diffs);
+							diffs++;
+							// if (diffs++ >= 127) {
+							// 	LOG_INFO("More than 128 errors");
+							// 	command_print(CMD, "More than 128 errors, the rest are not printed.");
+							// 	free(data);
+							// 	free(buffer);
+							// 	goto done;
+							// }
 						}
 						keep_alive();
 					}
+				} else{
+					LOG_ERROR("Failed to read target flashed memory");
 				}
 				free(data);
 			}
