@@ -42,22 +42,17 @@ do {										\
 	while (wp == rp) {							\
 		wp = *(uint32_t *)buffer_start;					\
 		if (wp == 0) {							\
-			*(uint32_t *)(buffer_start + 8) = 0xdeadbeef;  \
 			flash_regs_base = 0;					\
 			goto exit;						\
 		}								\
 		rp = *(uint32_t *)(buffer_start + 4);				\
-		*(uint32_t *)(buffer_start + 8) = hwords_count; \
 	}									\
 } while (0)
 
 /* wait write busy, if error set rp to zero and write status register value to r0 */
 #define WAIT_BUSY								\
 do {											\
-	*(uint32_t *)(buffer_start + 8) = hwords_count;			\
-	while (CH32F2X_FLASH_STATR_REG & CH32F2X_FLASH_STATR_BSY){ \
-		*(uint32_t *)(buffer_start + 8) = hwords_count;	\
-	}		\
+	while (CH32F2X_FLASH_STATR_REG & CH32F2X_FLASH_STATR_BSY);		\
 	if (CH32F2X_FLASH_STATR_REG & CH32F2X_FLASH_STATR_WRPRTERR) {		\
 		*(uint32_t *)(buffer_start + 4) = 0;				\
 		flash_regs_base = CH32F2X_FLASH_STATR_REG;			\
@@ -111,7 +106,7 @@ __attribute__((naked)) void flash_write(uint32_t flash_regs_base,
 
 				while (CH32F2X_FLASH_STATR_REG & CH32F2X_FLASH_STATR_WRBSY);
 				if (rp >= (uint32_t)buffer_end)
-					rp = (uint32_t)buffer_start + 12;
+					rp = (uint32_t)buffer_start + 8;
 				
 				*(uint32_t *)(buffer_start + 4) = rp;
 				hwords_count -= 2;	
@@ -135,16 +130,14 @@ __attribute__((naked)) void flash_write(uint32_t flash_regs_base,
 
 			WAIT_BUSY;
 			if (rp >= (uint32_t)buffer_end)
-				rp = (uint32_t)buffer_start + 12;
+				rp = (uint32_t)buffer_start + 8;
 			
 			*(uint32_t *)(buffer_start + 4) = rp;
 			hwords_count -= 1;	
 		}	
 	}
-	*(uint32_t *)(buffer_start + 8) = hwords_count;
 exit:
 	CH32F2X_FLASH_CTRL_REG &= ~CH32F2X_FLASH_CTRL_PG;
 	CH32F2X_FLASH_CTRL_REG &= ~CH32F2X_FLASH_CTRL_FTPG;
-	*(uint32_t *)(buffer_start + 8) |= 0xf0;
 	__asm("bkpt #0");
 }
